@@ -1,0 +1,119 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso Bautizo - Lector QR</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f6f9; padding: 16px; color: #222; }
+    main { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 14px; }
+    h1 { text-align: center; color: #173b67; }
+    button, input { box-sizing: border-box; width: 100%; padding: 14px; margin-top: 10px; font-size: 16px; }
+    button { background: #173b67; color: white; border: 0; border-radius: 8px; }
+    #lector { width: 100%; margin-top: 15px; }
+    #resultado { margin-top: 18px; padding: 12px; white-space: pre-line; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Acceso Bautizo</h1>
+  <p>Escanea el QR de la familia o escribe su código.</p>
+  <div id="lector"></div>
+  <button onclick="iniciarCamara()">Activar cámara</button>
+  <input id="token" placeholder="Código de invitación">
+  <button onclick="consultarCodigo()">Consultar invitación</button>
+  <div id="resultado" aria-live="polite"></div>
+</main>
+
+<script>
+const URL_APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbw0DM-lfhiq-h8_6Vaqw4SyuweqdEO9ewUJwQrPD7olMqaANDKtYiU0TvCcopgS6zVOWQ/exec';
+
+function mostrar(texto) {
+  document.getElementById('resultado').textContent = texto;
+}
+
+let lector = null;
+let tokenActual = '';
+
+async function iniciarCamara() {
+  try {
+    mostrar('Buscando cámara...');
+    if (typeof Html5Qrcode === 'undefined') {
+      throw new Error('No se cargó el lector QR. Revisa tu conexión.');
+    }
+
+    const camaras = await Html5Qrcode.getCameras();
+    if (!camaras.length) throw new Error('No se encontraron cámaras.');
+
+    lector = new Html5Qrcode('lector');
+    await lector.start(
+      camaras.find(c => /back|rear|environment|trasera/i.test(c.label))?.id || camaras[0].id,
+      { fps: 10, qrbox: { width: 220, height: 220 } },
+      async texto => {
+        document.getElementById('token').value = texto.trim();
+        await lector.stop().catch(() => {});
+        consultarCodigo();
+      },
+      () => {}
+    );
+    mostrar('Cámara activada. Apunta al QR.');
+  } catch (e) {
+    mostrar('No se pudo iniciar la cámara: ' + e.name + ' - ' + e.message);
+  }
+}
+
+function consultarCodigo() {
+  const token = document.getElementById('token').value.trim();
+  if (!token) {
+    mostrar('Escribe o escanea un código.');
+    return;
+  }
+
+  mostrar('Consultando invitación...');
+  fetch(URL_APPS_SCRIPT + '?accion=consultar&token=' + encodeURIComponent(token))
+    .then(r => r.json())
+    .then(r => {
+      if (!r.encontrado) {
+        tokenActual = '';
+        mostrar('Código no válido.');
+        return;
+      }
+
+      tokenActual = token;
+      mostrar(
+        'Nombre: ' + r.nombre +
+        '\nMesa: ' + r.mesa +
+        '\nPersonas: ' + r.personas +
+        '\nEstado: ' + r.estado
+      );
+
+      if (String(r.estado).toLowerCase() === 'pendiente') {
+        const boton = document.createElement('button');
+        boton.textContent = 'Confirmar entrada';
+        boton.onclick = registrarEntrada;
+        document.getElementById('resultado').appendChild(boton);
+      } else {
+        tokenActual = '';
+        mostrar('Esta invitación ya fue utilizada.\nNombre: ' + r.nombre +
+          '\nMesa: ' + r.mesa + '\nPersonas: ' + r.personas);
+      }
+    })
+    .catch(() => mostrar('No se pudo conectar con el sistema de invitados.'));
+}
+
+function registrarEntrada() {
+  if (!tokenActual) return;
+  mostrar('Registrando entrada...');
+  fetch(URL_APPS_SCRIPT + '?accion=registrar&token=' + encodeURIComponent(tokenActual))
+    .then(r => r.json())
+    .then(r => {
+      tokenActual = '';
+      mostrar(r.mensaje || 'Respuesta recibida.');
+    })
+    .catch(() => mostrar('No se pudo registrar. Revisa el sistema antes de intentar de nuevo.'));
+}
+</script>
+</body>
+</html>
