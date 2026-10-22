@@ -64,56 +64,104 @@ async function iniciarCamara() {
   }
 }
 
-function consultarCodigo() {
+
+function llamarAppsScript(accion, token) {
+  return new Promise((resolve, reject) => {
+    const callback = 'respuestaQR' + Date.now() +
+      Math.floor(Math.random() * 1000);
+
+    const script = document.createElement('script');
+    const temporizador = setTimeout(() => {
+      limpiar();
+      reject(new Error('Tiempo de espera agotado'));
+    }, 15000);
+
+    function limpiar() {
+      clearTimeout(temporizador);
+      delete window[callback];
+      script.remove();
+    }
+
+    window[callback] = function(respuesta) {
+      limpiar();
+      resolve(respuesta);
+    };
+
+    script.onerror = function() {
+      limpiar();
+      reject(new Error('No se pudo conectar'));
+    };
+
+    script.src = URL_APPS_SCRIPT +
+      '?accion=' + encodeURIComponent(accion) +
+      '&token=' + encodeURIComponent(token) +
+      '&callback=' + encodeURIComponent(callback);
+
+    document.body.appendChild(script);
+  });
+}
+
+async function consultarCodigo() {
   const token = document.getElementById('token').value.trim();
+
   if (!token) {
     mostrar('Escribe o escanea un código.');
     return;
   }
 
   mostrar('Consultando invitación...');
-  fetch(URL_APPS_SCRIPT + '?accion=consultar&token=' + encodeURIComponent(token))
-    .then(r => r.json())
-    .then(r => {
-      if (!r.encontrado) {
-        tokenActual = '';
-        mostrar('Código no válido.');
-        return;
-      }
 
-      tokenActual = token;
-      mostrar(
-        'Nombre: ' + r.nombre +
-        '\nMesa: ' + r.mesa +
-        '\nPersonas: ' + r.personas +
-        '\nEstado: ' + r.estado
-      );
+  try {
+    const r = await llamarAppsScript('consultar', token);
 
-      if (String(r.estado).toLowerCase() === 'pendiente') {
-        const boton = document.createElement('button');
-        boton.textContent = 'Confirmar entrada';
-        boton.onclick = registrarEntrada;
-        document.getElementById('resultado').appendChild(boton);
-      } else {
-        tokenActual = '';
-        mostrar('Esta invitación ya fue utilizada.\nNombre: ' + r.nombre +
-          '\nMesa: ' + r.mesa + '\nPersonas: ' + r.personas);
-      }
-    })
-    .catch(() => mostrar('No se pudo conectar con el sistema de invitados.'));
-}
-
-function registrarEntrada() {
-  if (!tokenActual) return;
-  mostrar('Registrando entrada...');
-  fetch(URL_APPS_SCRIPT + '?accion=registrar&token=' + encodeURIComponent(tokenActual))
-    .then(r => r.json())
-    .then(r => {
+    if (!r.encontrado) {
       tokenActual = '';
-      mostrar(r.mensaje || 'Respuesta recibida.');
-    })
-    .catch(() => mostrar('No se pudo registrar. Revisa el sistema antes de intentar de nuevo.'));
+      mostrar('Código no válido.');
+      return;
+    }
+
+    tokenActual = token;
+
+    mostrar(
+      'Nombre: ' + r.nombre +
+      '\nMesa: ' + r.mesa +
+      '\nPersonas: ' + r.personas +
+      '\nEstado: ' + r.estado
+    );
+
+    if (String(r.estado).toLowerCase() === 'pendiente') {
+      const boton = document.createElement('button');
+      boton.textContent = 'Confirmar entrada';
+      boton.onclick = registrarEntrada;
+      document.getElementById('resultado').appendChild(boton);
+    } else {
+      tokenActual = '';
+      mostrar(
+        'Esta invitación ya fue utilizada.\nNombre: ' +
+        r.nombre + '\nMesa: ' + r.mesa +
+        '\nPersonas: ' + r.personas
+      );
+    }
+  } catch (e) {
+    mostrar('Error de conexión: ' + e.message);
+  }
 }
+
+async function registrarEntrada() {
+  if (!tokenActual) return;
+
+  const token = tokenActual;
+  mostrar('Registrando entrada...');
+
+  try {
+    const r = await llamarAppsScript('registrar', token);
+    tokenActual = '';
+    mostrar(r.mensaje || 'Respuesta recibida.');
+  } catch (e) {
+    mostrar('No se pudo confirmar la entrada. Verifica el estado en Google Sheets antes de reintentar.');
+  }
+}
+
 </script>
 </body>
 </html>
